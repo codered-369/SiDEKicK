@@ -64,6 +64,7 @@ function openWhatsApp() {
 
 // --- Traffic Bro Logic ---
 let currentAudio = null;
+let activeEffects = []; // Track manual sound effects like horns play request
 let parkingIntervar = null; // Future use
 
 const SOUND_ASSETS = {
@@ -85,11 +86,22 @@ function toggleSound(type, btnElement) {
     // 3. Play new sound
     const audio = new Audio(SOUND_ASSETS[type]);
     audio.loop = true;
-    audio.play();
+
+    // Store type for toggle logic
+    audio.type = type;
+
+    // Helper to safely play
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(error => {
+            console.warn("Audio play failed:", error);
+            // If play fails, we shouldn't consider it 'playing'
+            if (currentAudio === audio) currentAudio = null;
+        });
+    }
 
     // State tracking
     currentAudio = audio;
-    currentAudio.type = type;
 
     // UI Updates
     btnElement.classList.add('active');
@@ -98,16 +110,35 @@ function toggleSound(type, btnElement) {
 
 function playEffect(type) {
     const audio = new Audio(SOUND_ASSETS[type]);
-    audio.play();
+    activeEffects.push(audio);
+
+    // Remove from tracking when done
+    audio.onended = () => {
+        const index = activeEffects.indexOf(audio);
+        if (index > -1) {
+            activeEffects.splice(index, 1);
+        }
+    };
+
+    audio.play().catch(e => console.warn("Effect play failed:", e));
 }
 
 function stopAllSounds() {
+    // 1. Stop Ambient Loop
     if (currentAudio) {
         currentAudio.pause();
+        currentAudio.currentTime = 0; // Reset position
         currentAudio = null;
     }
 
-    // UI Reset
+    // 2. Stop All Active Effects (Horns etc)
+    activeEffects.forEach(audio => {
+        audio.pause();
+        audio.currentTime = 0;
+    });
+    activeEffects = []; // Clear array
+
+    // 3. UI Reset
     document.querySelectorAll('.sound-card').forEach(el => el.classList.remove('active'));
     const indicator = document.getElementById('playing-indicator');
     if (indicator) indicator.classList.add('hidden');
@@ -329,9 +360,12 @@ window.shareSickAudio = shareSickAudio;
 let updateInterval = null;
 
 function startFakeUpdate() {
-    // Force fullscreen if possible (optional, might block interaction)
+    // Force fullscreen if possible
     const el = document.documentElement;
     if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
+
+    // Push history state so Browser Back button returns to Dashboard instead of closing app
+    history.pushState({ page: 'fake-update' }, "System Update", "#update");
 
     let percent = 0;
     const percentDisplay = document.getElementById('update-percent');
@@ -361,6 +395,21 @@ showHome = () => {
     if (updateInterval) clearInterval(updateInterval);
     originalShowHome();
 }
+
+// Global Event Listeners for Exit Scenarios
+document.addEventListener('fullscreenchange', () => {
+    const updateView = document.getElementById('update-view');
+    // If fullscreen exited (e.g. via Esc) AND update view is still visible, go home manually
+    if (!document.fullscreenElement && updateView && updateView.style.display !== 'none') {
+        showHome();
+    }
+});
+
+window.addEventListener('popstate', () => {
+    // If user clicks Browser Back, ensure we show home/dashboard
+    showHome();
+});
+
 window.showHome = showHome;
 window.startFakeUpdate = startFakeUpdate;
 
